@@ -1,5 +1,6 @@
 import gymnasium as gym
 import optuna
+import numpy as np
 from stable_baselines3 import DQN
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
@@ -7,7 +8,45 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import os
 
-# Helper functions
+# Globals
+
+# Discrete actions for CarRacing
+ACTIONS = [
+    [-1.0, 1.0, 0.0], # left + gas
+    [ 0.0, 1.0, 0.0], # straight + gas
+    [ 1.0, 1.0, 0.0], # right + gas
+    [ 0.0, 0.0, 1.0], # brake
+    [ 0.0, 0.0, 0.0]]
+
+
+class DiscreteCarRacing(gym.Env):
+    def __init__(self):
+        self.env = gym.make("CarRacing-v3", render_mode="rgb_array")
+        self.action_space = gym.spaces.Discrete(len(ACTIONS))
+        self.observation_space = self.env.observation_space
+
+    def step(self, action_index):
+        # Map discrete index to actual action
+        action = np.array(ACTIONS[action_index], dtype=np.float32)
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        done = terminated or truncated
+        return obs, reward, done, info
+
+
+def evaluate_model(model, env_class=DiscreteCarRacing, n_eval_episodes=100, use_predict=True):
+    """
+    Evaluates a given RL model on the provided environment class.
+    """
+
+    print("\n--- Evaluating Final Model Performance ---")
+    eval_env = env_class()
+    mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=n_eval_episodes)
+    
+    print(f"Final Model: Mean reward = {mean_reward:.2f} +/- {std_reward:.2f}")
+    eval_env.close()
+    
+    return mean_reward, std_reward
+
 
 def plot_learning_curve(log_path, window_size=100):
     """Generates and saves a plot of the learning curve."""
@@ -15,6 +54,7 @@ def plot_learning_curve(log_path, window_size=100):
         log_data = pd.read_csv(log_path + ".monitor.csv", skiprows=1)
         cumulative_timesteps = log_data['l'].cumsum()
         moving_avg = log_data['r'].rolling(window=window_size).mean()
+
         plt.figure(figsize=(10, 6))
         plt.plot(cumulative_timesteps, log_data['r'], alpha=0.3, label='Per-Episode Reward')
         plt.plot(cumulative_timesteps, moving_avg, color='red', linewidth=2, label=f'Moving Average (window={window_size})')
@@ -24,6 +64,7 @@ def plot_learning_curve(log_path, window_size=100):
         plt.legend()
         plt.grid(True)
         plt.savefig("learning_curve.png")
+        plt.close()
         print("\nLearning curve plot saved to learning_curve.png")
     except FileNotFoundError:
         print("\nCould not find monitor log file. Skipping learning curve plot.")
@@ -38,6 +79,7 @@ def plot_optuna_study(study):
         print("No successful trials with values to plot.")
         return
     trial_numbers = [t.number for t in study.trials if t.value is not None]
+
     plt.figure(figsize=(10, 6))
     plt.plot(trial_numbers, trial_values, marker='o', linestyle='--')
     if study.best_trial and study.best_trial.value is not None:
@@ -56,15 +98,26 @@ def plot_optuna_study(study):
 # Hyperparameter tuning with Optuna
 def objective(trial):
     """The objective function for Optuna to maximize."""
-    trial_env = gym.make("CartPole-v1")
+    trial_env = DiscreteCarRacing()
     trial_env = Monitor(trial_env)
 
     learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True) 
-    gamma = trial.suggest_float("gamma", 0.9, 0.9999) 
-    layer_size = trial.suggest_categorical("layer_size", [64, 128, 256]) 
-    batch_size = trial.suggest_categorical("batch_size", [32, 64, 128]) # second test
-    tau = trial.suggest_float("tau", 0.0001, 0.9999) # third test
-    exploration_final_eps = trial.suggest_float("exploration_final_eps", 0.01, 1.0) # fourth test (values suggested på AI)
+    gamma = trial.suggest_float("gamma", 0.99, 0.9999) 
+    layer_size = trial.suggest_categorical("layer_size", [64, 128, 256]) # first
+    batch_size = trial.suggest_categorical("batch_size", [32, 64, 128]) # second 
+    tau = trial.suggest_float("tau", 0.001, 0.1) # third 
+    exploration_final_eps = trial.suggest_float("exploration_final_eps", 0.01, 0.5) # fourth  
+    # Number of transitions stored for experience replay
+    buffer_size = trial.suggest_categorical("buffer_size", [100_000, 300_000, 500_000])
+    # Agent explores early on
+    exploration_fraction = trial.suggest_float("exploration_fraction", 0.1, 0.3)
+    # How often the network is updated
+    target_update_interval = trial.suggest_categorical("target_update_interval", [500, 1000, 5000])  
+
+    # How often the policy is updated (every n environment steps)
+    train_freq = trial.suggest_categorical("train_freq", [1, 4, 8])  
+    # Number of gradient updates per train step
+    gradient_steps = trial.suggest_categorical("gradient_steps", [1, 2, 4])  
 
     net_arch = [layer_size, layer_size]
     policy_kwargs = dict(net_arch=net_arch)
@@ -74,13 +127,17 @@ def objective(trial):
         trial_env, 
         learning_rate=learning_rate, 
         gamma=gamma,
-        policy_kwargs=policy_kwargs,
         batch_size=batch_size,
         tau=tau,
         exploration_final_eps=exploration_final_eps,
+        buffer_size=buffer_size,
+        exploration_fraction=exploration_fraction,
+        target_update_interval=target_update_interval,
+        policy_kwargs=policy_kwargs,
         verbose=0
     )
     
+    #100000 - 300000
     model.learn(total_timesteps=10000)
     
     mean_reward, _ = evaluate_policy(model, trial_env, n_eval_episodes=50)
@@ -94,7 +151,7 @@ if __name__ == "__main__":
     
     # Runtime variables
     STORAGE_PATH = "sqlite:///my_study.db" # database
-    STUDY_NAME = "cartpole-optimization" # Name of your study
+    STUDY_NAME = "car_racing_dqn"
     NUM_TRIALS_TO_RUN = 30 # Number of trial runs
 
     study = optuna.create_study(
@@ -119,28 +176,29 @@ if __name__ == "__main__":
             print(f"    {key}: {value}")
             
         print("\n--- Training the final, best model ---")
+        final_env = DiscreteCarRacing()
+        final_env = Monitor(final_env, filename=os.path.join(LOG_DIR, "final_model"))
+
         best_params = best_trial.params.copy()
         final_layer_size = best_params.pop('layer_size')
         final_policy_kwargs = dict(net_arch=[final_layer_size, final_layer_size])
         
         # Create and wrap the environment with Monitor for logging
-        final_env = gym.make("CartPole-v1")
+        #final_env = gym.make("CartPole-v1")
+        #final_env = Monitor(final_env, final_log_path)        
         final_log_path = os.path.join(LOG_DIR, "final_model_logs")
-        final_env = Monitor(final_env, final_log_path)
-        
-        final_model = DQN("MlpPolicy", final_env, policy_kwargs=final_policy_kwargs,
-                          **best_params, verbose=0)
+        final_model = DQN(
+            "MlpPolicy", 
+            final_env, 
+            policy_kwargs=final_policy_kwargs,
+            **best_params, 
+            verbose=1)
         
         final_model.learn(total_timesteps=30000)
-        final_model.save("best_cartpole_model")
-        print("\nFinal model saved to best_cartpole_model.zip")
+        final_model.save("best_carracing_model")
+        print("\nFinal model saved to zip")
         
-        # Built-in evaluation
-        print("\n--- Evaluating Final Model Performance ---")
-        eval_env = gym.make("CartPole-v1")
-        mean_reward, std_reward = evaluate_policy(final_model, eval_env, n_eval_episodes=100)
-        print(f"Final Model: Mean reward = {mean_reward:.2f} +/- {std_reward:.2f}")
-        eval_env.close()
+        mean_reward, std_reward = evaluate_model(final_model)
         
         # Images & Plotting
         plot_optuna_study(study)
