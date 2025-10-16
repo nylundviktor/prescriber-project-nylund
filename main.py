@@ -64,7 +64,7 @@ def objective(trial):
     layer_size = trial.suggest_categorical("layer_size", [64, 128, 256]) 
     batch_size = trial.suggest_categorical("batch_size", [32, 64, 128]) # second test
     tau = trial.suggest_float("tau", 0.0001, 0.9999) # third test
-    #exploration_final_eps = trial.suggest_float("exploration_final_eps", 0.01, 1.0) # fourth test (values suggested på AI)
+    exploration_final_eps = trial.suggest_float("exploration_final_eps", 0.01, 1.0) # fourth test (values suggested på AI)
 
     net_arch = [layer_size, layer_size]
     policy_kwargs = dict(net_arch=net_arch)
@@ -77,7 +77,7 @@ def objective(trial):
         policy_kwargs=policy_kwargs,
         batch_size=batch_size,
         tau=tau,
-        #exploration_final_eps=exploration_final_eps,
+        exploration_final_eps=exploration_final_eps,
         verbose=0
     )
     
