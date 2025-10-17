@@ -21,7 +21,11 @@ Jag kommer använda mig av
 för att lösa Car Racing miljön.  
 [Car Racing - Gymnasium](https://gymnasium.farama.org/environments/box2d/car_racing/)
 
-Jag bestämde att göra handlingarna diskreta för att minska arbetsmängden och för att det blir mer användbart för Monte Carlo metoden. 
+Att byta till CarRacing-v3 från CartPole orsakade en del strul med versioner, men jag skapade en ny conda environment och hittade en kombination av versioner som fungerade tillsammans. De är specificerade i *requirements.txt* och *environment.yml*
+
+Att byta till diskreta handlingar visade sig vara mycket lättare än förväntat. Jag önskar jag hade noterat det tidigare att det endast krävde `continuous=False`. 
+
+
 
 ---
 
@@ -31,7 +35,7 @@ Jag bestämde att göra handlingarna diskreta för att minska arbetsmängden och
 - kör flera batches i taget för att uppskatta värdet
 
 
-
+De bästa hyperparametrarna hittas av Optuna på samma vis som i uppgift *6 - Cartpole*.
 Jag följde AI's förslag på parametrarna lägsta och högsta värden.
 
 

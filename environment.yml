@@ -1,0 +1,20 @@
+name: carracing
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - numpy=2.0.2
+  - scipy=1.16.2
+  - pip:
+      - torch==2.8.0
+      - torchvision==0.24.0
+      - torchaudio==2.8.0
+      - gymnasium==1.2.1
+      - stable-baselines3==2.7.0
+      - sb3-contrib==2.2.0
+      - opencv-python
+      - matplotlib
+      - optuna
+      - swig
