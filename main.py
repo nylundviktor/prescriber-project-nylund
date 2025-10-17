@@ -9,6 +9,20 @@ import pandas as pd
 import os
 
 
+def make_carracing_env(log_dir=None):
+    """Return a CarRacing-v3 environment wrapped with WarpFrame and Monitor."""
+    env = gym.make(
+        "CarRacing-v3",
+        render_mode="rgb_array",
+        lap_complete_percent=0.95,
+        domain_randomize=False,
+        continuous=False
+    )
+    env = WarpFrame(env, width=84, height=84)
+    env = Monitor(env, log_dir)
+    return env
+
+
 def plot_learning_curve(log_path, window_size=100):
     """Generates and saves a plot of the learning curve.
     
@@ -91,14 +105,10 @@ def objective(trial):
     Hardcoded policy type "MlpPolicy" — works, but if you switch to CNN for image input, 
     you'd need to generalize.
     """
+    print("\nstarting Optuna Trial...")
+
     # Only for training
-    trial_env = Monitor(WarpFrame(gym.make(
-        "CarRacing-v3",
-        render_mode="rgb_array",
-        lap_complete_percent=0.95,
-        domain_randomize=False,
-        continuous=False), 
-        width=84, height=84))
+    trial_env = make_carracing_env()
 
     learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True) 
     gamma = trial.suggest_float("gamma", 0.99, 0.9999) 
@@ -137,20 +147,14 @@ def objective(trial):
     )
     
     # 5k-10k OK
-    model.learn(total_timesteps=5000)
+    model.learn(total_timesteps=4000)
 
     # fresh evaluation environment (callable)
-    eval_env_class = lambda: Monitor( WarpFrame( gym.make(
-        "CarRacing-v3",
-        render_mode="rgb_array",
-        lap_complete_percent=0.95,
-        domain_randomize=False,
-        continuous=False
-    )))
+    eval_env_class = lambda: make_carracing_env()
     
     # Evaluate using the separate environment. 10-20
-    mean_reward, _ = evaluate_model(model, env_class=eval_env_class, n_eval_episodes=10, use_predict=True)
-    print(f"Trial {trial.number} completed and values stored. \nMean reward: {mean_reward:.2f}.")
+    mean_reward, _ = evaluate_model(model, env_class=eval_env_class, n_eval_episodes=5, use_predict=True)
+    print(f"Trial {trial.number} completed and values stored.")
     trial_env.close()
     return mean_reward
 
@@ -169,8 +173,7 @@ def train_final_model(best_trial, total_timesteps=50_000, log_dir="logs/"):
     final_policy_kwargs = dict(net_arch=[final_layer_size, final_layer_size])
 
     # Create and wrap environment with Monitor for logging
-    final_env = gym.make("CarRacing-v3", continuous=False)
-    final_env = Monitor(final_env, final_log_path)
+    final_env = make_carracing_env(log_dir=final_log_path)
 
     # Create DQN model with best hyperparameters
     final_model = DQN(
@@ -204,7 +207,7 @@ def evaluate_model(model, env_class, n_eval_episodes=100, use_predict=True):
     but this is a minor detail for the overarching structure.
     """
 
-    print("\n--- Evaluating Optuna Trial Model Performance ---")
+    print("\n--- Evaluating Model Performance ---")
     
     eval_env = env_class()
     rewards = []
@@ -267,8 +270,12 @@ if __name__ == "__main__":
             
         # Train the final model
         final_model, final_log_path = train_final_model(best_trial, 10_000, log_dir=LOG_DIR)
+
+        eval_env_class = lambda: make_carracing_env()
         # Evaluate
-        mean_reward, std_reward = evaluate_model(final_model, n_eval_episodes=30)
+        mean_reward, std_reward = evaluate_model(
+            final_model, env_class=eval_env_class, n_eval_episodes=30, use_predict=True
+            )
         
         # Images & Plotting
         plot_optuna_study(study)
